@@ -78,8 +78,7 @@ class RAGPipeline:
                 seen.add(key)
 
         documents = combined_documents
-        print("
-Retrieved Documents:")
+        print("\nRetrieved Documents:")
         for doc in documents:
             print(os.path.basename(doc.metadata["source"]), "Page", doc.metadata["page"])
 
@@ -119,26 +118,18 @@ Retrieved Documents:")
             pdf_name = os.path.basename(document.metadata["source"])
             document_groups[pdf_name].append(document)
 
-        print("
-Retrieved Documents")
+        print("\nRetrieved Documents")
         for pdf_name, docs in document_groups.items():
-            print(f"
-{pdf_name}")
+            print(f"{pdf_name}")
             for doc in docs:
                 print(f"  Page {doc.metadata['page']}")
 
         context = ""
         for pdf_name, docs in document_groups.items():
-            context += f"
-========== {pdf_name} ==========
-
-"
+            context += f"========== {pdf_name} =========="
             for document in docs:
                 page = document.metadata["page"]
-                context += f"[Document: {pdf_name} | Page: {page}]
-{document.page_content}
-
-"
+                context += f"[Document: {pdf_name} | Page: {page}]{document.page_content}"
 
         prompt = f"""
 You are an expert Multi-Document AI Assistant.
@@ -183,8 +174,7 @@ Answer:
 
         response = self.llm.invoke(prompt)
 
-        print("
-==============================")
+        print("==============================")
         print("Retrieved Documents:", len(documents))
         print("==============================")
 
