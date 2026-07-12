@@ -3,13 +3,14 @@ import streamlit as st
 from src.rag_pipeline import RAGPipeline
 from collections import defaultdict
 
-#Page configuration
+# Page configuration
 st.set_page_config(
     page_title="Document RAG Assistant",
     page_icon="📄",
     layout="wide"
 )
-st.title("📄Document RAG Assistant")
+
+st.title("📄 Document RAG Assistant")
 st.write("Ask questions about your uploaded PDFs")
 
 #Initialize pipeline
