@@ -227,7 +227,7 @@ if question:
 
         if source_lines:
             sources_text = "\n".join(source_lines)
-            response = """
+            response = f"""
 {answer}
 
 ---
