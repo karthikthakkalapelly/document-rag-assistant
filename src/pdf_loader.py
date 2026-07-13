@@ -1,10 +1,8 @@
-﻿import base64
-import io
+﻿import io
 import os
 import platform
 from typing import List
 from langchain_core.documents import Document
-import requests
 
 if platform.system() == "Windows":
     POPPLER_PATH = r"C:\Users\Karthik\Downloads\poppler\poppler-25.07.0\Library\bin"
@@ -25,10 +23,6 @@ def _has_tesseract():
     except ImportError:
         print("pytesseract not installed")
         return False
-
-
-def _get_google_api_key():
-    return os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 
 
 def _ocr_placeholder(page_number, pdf_path, reason):
@@ -100,56 +94,30 @@ def _extract_images_from_pdf(pdf_path) -> List[object]:
 
 
 def _google_vision_ocr(image, api_key):
-    buffered = io.BytesIO()
-    image.save(buffered, format="PNG")
-    image_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    raise RuntimeError("Google Vision OCR has been removed. Use Tesseract (pytesseract) instead.")
 
-    url = f"https://vision.googleapis.com/v1/images:annotate?key={api_key}"
-    payload = {
-        "requests": [
-            {
-                "image": {"content": image_base64},
-                "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
-            }
-        ]
-    }
+
+def _ocr_image(image):
+    """OCR a PIL image using pytesseract. Returns extracted text or empty string on failure.
+
+    Does not call external cloud OCR. Errors are logged and an empty string is returned
+    so the caller can attach a placeholder document instead of crashing.
+    """
+    tesseract_available = _has_tesseract()
+    print("OCR: starting image OCR. Tesseract available:", tesseract_available)
+    if not tesseract_available:
+        print("OCR: pytesseract not available; skipping OCR")
+        return ""
 
     try:
-        response = requests.post(url, json=payload, timeout=60)
-        response.raise_for_status()
-    except requests.exceptions.HTTPError as exc:
-        print("Google Vision OCR request failed:", exc)
-        # propagate so caller can surface the error
-        raise
-    except requests.exceptions.RequestException as exc:
-        print("Google Vision OCR network error:", exc)
-        raise
-
-    result = response.json()
-    annotations = result.get("responses", [{}])[0].get("fullTextAnnotation", {})
-    return annotations.get("text", "").strip()
-
-
-def _ocr_image(image, api_key=None):
-    print("OCR: starting image OCR. Tesseract available:", _has_tesseract(), "Google API key present:", bool(api_key))
-    if _has_tesseract():
-        try:
-            import pytesseract
-            text = pytesseract.image_to_string(image).strip()
-            print("OCR: pytesseract produced", len(text), "chars")
-            return text
-        except Exception as e:
-            print("pytesseract OCR failed:", type(e).__name__, e)
-            # propagate the exception so the failure is visible
-            raise
-
-    if api_key:
-        # _google_vision_ocr will raise on HTTP/network errors
-        text = _google_vision_ocr(image, api_key)
-        print("OCR: Google Vision produced", len(text), "chars")
+        import pytesseract
+        text = pytesseract.image_to_string(image).strip()
+        print("OCR: pytesseract produced", len(text), "chars")
         return text
-
-    raise RuntimeError("No OCR engine available: install Tesseract or set GOOGLE_API_KEY")
+    except Exception as e:
+        print("pytesseract OCR failed:", type(e).__name__, e)
+        # Return empty string so caller can attach a placeholder and continue
+        return ""
 
 
 def load_pdf(pdf_path):
@@ -163,8 +131,7 @@ def load_pdf(pdf_path):
     if len(text.strip()) > 100:
         return documents, False
 
-    print("Scanned PDF detected. Running OCR fallback...")
-    api_key = _get_google_api_key()
+    print("Scanned PDF detected. Running OCR fallback using pytesseract...")
 
     images = []
     try:
@@ -177,8 +144,14 @@ def load_pdf(pdf_path):
             print(f"Extracted {len(images)} embedded images from PDF")
         except Exception as exc2:
             print("PDF image extraction failed:", type(exc2).__name__, exc2)
-            # propagate so the caller/Streamlit shows the error
-            raise
+            # return placeholder indicating conversion failed
+            return [
+                _ocr_placeholder(
+                    1,
+                    pdf_path,
+                    "the PDF could not be converted to images on this platform",
+                )
+            ], True
 
     if not images:
         raise RuntimeError("No images found/rendered from PDF for OCR")
@@ -186,18 +159,12 @@ def load_pdf(pdf_path):
     ocr_docs = []
     for page_number, image in enumerate(images, start=1):
         print(f"OCR: processing page {page_number}/{len(images)}")
-        try:
-            ocr_text = _ocr_image(image, api_key=api_key)
-        except Exception:
-            print(f"OCR failed on page {page_number}; attaching placeholder")
-            raise
-
+        ocr_text = _ocr_image(image)
         print(f"OCR: page {page_number} text length: {len(ocr_text)}")
         if not ocr_text:
             reason = (
-                "OCR produced no text"
-                if api_key or _has_tesseract()
-                else "Tesseract is not installed and no Google API key is configured"
+                "Tesseract is not installed or OCR failed on this page."
+                " Install Tesseract to enable OCR."
             )
             ocr_docs.append(_ocr_placeholder(page_number, pdf_path, reason))
         else:
