@@ -1,23 +1,16 @@
-from langchain_community.document_loaders import PyPDFLoader
-from pdf2image import convert_from_path
-import pytesseract
-from langchain_core.documents import Document
 import platform
 
 if platform.system() == "Windows":
-
     POPPLER_PATH = r"C:\Users\Karthik\Downloads\poppler\poppler-25.07.0\Library\bin"
-
-    pytesseract.pytesseract.tesseract_cmd = (
-        r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-    )
-
 else:
-
     POPPLER_PATH = None
 
 
 def load_pdf(pdf_path):
+    from langchain_community.document_loaders import PyPDFLoader
+    from pdf2image import convert_from_path
+    import pytesseract
+    from langchain_core.documents import Document
 
     loader = PyPDFLoader(pdf_path)
     documents = loader.load()

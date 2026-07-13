@@ -1,7 +1,13 @@
 import os
 import streamlit as st
-from src.rag_pipeline import RAGPipeline
 from collections import defaultdict
+
+try:
+    from src.rag_pipeline import RAGPipeline
+    RAG_PIPELINE_IMPORT_ERROR = None
+except Exception as exc:
+    RAGPipeline = None
+    RAG_PIPELINE_IMPORT_ERROR = exc
 
 # Page configuration
 st.set_page_config(
@@ -13,10 +19,14 @@ st.set_page_config(
 st.title("📄 Document RAG Assistant")
 st.write("Ask questions about your uploaded PDFs")
 
-#Initialize pipeline
+if RAG_PIPELINE_IMPORT_ERROR is not None:
+    st.error("Backend failed to load. Please check server logs.")
+    st.exception(RAG_PIPELINE_IMPORT_ERROR)
+    st.stop()
 
+# Initialize pipeline
 if "pipeline" not in st.session_state:
-    st.session_state.pipeline=RAGPipeline()
+    st.session_state.pipeline = RAGPipeline()
 
 #Initialize chat history
 if "messages" not in st.session_state:

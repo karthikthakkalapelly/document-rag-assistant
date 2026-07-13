@@ -4,20 +4,23 @@ import os
 from src.chunker import create_chunks
 from src.llm import load_llm
 from src.pdf_loader import load_pdf
-from src.retriever import load_vector_store
-from src.vector_store import create_vector_store
 from src.hybrid_search import HybridSearch
 
 
 class RAGPipeline:
     def __init__(self):
         self.vector_store = None
-        self.llm = load_llm()
+        self.llm = None
         self.hybrid_search = None
         self.pdf_names = []
         self.ocr_documents = []
         self.total_pages = 0
         self.total_chunks = 0
+
+    def load_llm_if_needed(self):
+        if self.llm is None:
+            self.llm = load_llm()
+        return self.llm
 
     def build_database(self, pdf_paths):
         all_documents = []
@@ -47,6 +50,9 @@ class RAGPipeline:
         self.total_chunks = len(chunks)
         self.hybrid_search = HybridSearch(chunks)
         print(f"Total chunks: {self.total_chunks}")
+
+        from src.vector_store import create_vector_store
+        from src.retriever import load_vector_store
 
         database_path = os.path.join("database", str(hash(tuple(sorted(self.pdf_names)))))
         create_vector_store(chunks, database_path)
@@ -172,7 +178,16 @@ Rules:
 Answer:
 """
 
-        response = self.llm.invoke(prompt)
+        llm = self.load_llm_if_needed()
+        if llm is None:
+            return (
+                "The AI model is not available because the cloud API key is not configured. "
+                "Set GOOGLE_API_KEY or GEMINI_API_KEY in Render environment variables.",
+                documents,
+                0,
+            )
+
+        response = llm.invoke(prompt)
 
         print("==============================")
         print("Retrieved Documents:", len(documents))
