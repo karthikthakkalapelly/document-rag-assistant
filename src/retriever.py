@@ -1,7 +1,10 @@
-def load_vector_store(database_path):
+def load_vector_store(database_path, embedding_model=None):
     from langchain_chroma import Chroma
 
-    return Chroma(persist_directory=database_path)
+    return Chroma(
+        persist_directory=database_path,
+        embedding_function=embedding_model,
+    )
 
 
 def search_documents(vector_store, query, k=3):

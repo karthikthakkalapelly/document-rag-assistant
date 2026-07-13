@@ -31,7 +31,8 @@ def get_llm():
 @st.cache_resource(show_spinner=False)
 def get_vector_store(database_path):
     from src.retriever import load_vector_store
-    return load_vector_store(database_path)
+
+    return load_vector_store(database_path, embedding_model=get_embedding_model())
 
 RAGPipeline = None
 RAG_PIPELINE_IMPORT_ERROR = None
@@ -44,7 +45,20 @@ st.set_page_config(
 )
 
 st.title("📄 Document RAG Assistant")
-st.write("Ask questions about your uploaded PDFs")
+st.markdown(
+    "Upload PDFs, build a searchable knowledge base, and ask natural language "
+    "questions with Gemini. OCR and hybrid search are enabled automatically."
+)
+
+with st.expander("How it works", expanded=False):
+    st.write(
+        "1. Upload PDF documents.\n"
+        "2. The app indexes content with Chroma and Gemini embeddings.\n"
+        "3. Ask questions in the chat and get answers with referenced pages.\n"
+        "4. OCR is applied only when needed for scanned PDFs."
+    )
+
+st.divider()
 
 if RAG_PIPELINE_IMPORT_ERROR is not None:
     st.error("Backend failed to load. Please check server logs.")
@@ -67,6 +81,10 @@ if "uploaded_pdf_names" not in st.session_state:
 # Sidebar
 with st.sidebar:
     st.header("📂 Upload Documents")
+    st.info(
+        "Upload one or more PDFs to build a searchable document database. "
+        "OCR is applied automatically for scanned content."
+    )
     uploaded_files = st.file_uploader(
         "Choose PDF files",
         type=["pdf"],
@@ -99,7 +117,7 @@ with st.sidebar:
                     embedding_model=get_embedding_model(),
                 )
                 st.session_state.pipeline.vector_store = get_vector_store(
-                    st.session_state.pipeline.database_path
+                    st.session_state.pipeline.database_path,
                 )
 
             if st.session_state.pipeline.ocr_documents:
@@ -119,9 +137,11 @@ with st.sidebar:
 
     if st.session_state.database_ready:
         st.subheader("📄 Uploaded Documents")
-        st.write(f"Total PDFs: {len(st.session_state.pipeline.pdf_names)}")
-        st.write(f"Total pages: {st.session_state.pipeline.total_pages}")
-        st.write(f"Total chunks: {st.session_state.pipeline.total_chunks}")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("PDFs", len(st.session_state.pipeline.pdf_names))
+        col2.metric("Pages", st.session_state.pipeline.total_pages)
+        col3.metric("Chunks", st.session_state.pipeline.total_chunks)
+
         st.write("### Files")
         for pdf in st.session_state.pipeline.pdf_names:
             st.success(pdf)
@@ -138,7 +158,7 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # Chat input
-question = st.chat_input("Ask your question")
+question = st.chat_input("Enter your question about the uploaded documents")
 
 if question:
     if not st.session_state.database_ready:
