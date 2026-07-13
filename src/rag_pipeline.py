@@ -1,5 +1,5 @@
-from collections import defaultdict
 import os
+from collections import defaultdict
 
 
 class RAGPipeline:
@@ -11,6 +11,7 @@ class RAGPipeline:
         self.ocr_documents = []
         self.total_pages = 0
         self.total_chunks = 0
+        self.database_path = None
 
     def load_llm_if_needed(self):
         if self.llm is None:
@@ -22,6 +23,7 @@ class RAGPipeline:
         from src.chunker import create_chunks
         from src.pdf_loader import load_pdf
         from src.hybrid_search import HybridSearch
+        from src.vector_store import create_vector_store
 
         all_documents = []
         self.pdf_names = []
@@ -33,36 +35,30 @@ class RAGPipeline:
             pdf_paths = [pdf_paths]
 
         for pdf_path in pdf_paths:
-            print(f"Loading: {pdf_path}")
             documents, ocr_used = load_pdf(pdf_path)
-
             if ocr_used:
-                print(f"OCR used for {os.path.basename(pdf_path)}")
                 self.ocr_documents.append(os.path.basename(pdf_path))
-
             self.pdf_names.append(os.path.basename(pdf_path))
             self.total_pages += len(documents)
             all_documents.extend(documents)
 
-        print(f"Total Pages: {self.total_pages}")
-
         chunks = create_chunks(all_documents)
         self.total_chunks = len(chunks)
         self.hybrid_search = HybridSearch(chunks)
-        print(f"Total chunks: {self.total_chunks}")
-
-        from src.vector_store import create_vector_store
-        from src.retriever import load_vector_store
 
         if embedding_model is None:
-            from langchain_huggingface import HuggingFaceEmbeddings
-            embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+            from langchain_google_genai import GoogleGenerativeAIEmbeddings
+            api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            embedding_model = GoogleGenerativeAIEmbeddings(
+                model="models/embedding-001",
+                google_api_key=api_key,
+            )
 
-        database_path = os.path.join("database", str(hash(tuple(sorted(self.pdf_names)))))
-        create_vector_store(chunks, database_path, embedding_model=embedding_model)
-        self.vector_store = load_vector_store(database_path)
-
-        print("Vector database created successfully.")
+        self.database_path = os.path.join(
+            "database",
+            str(hash(tuple(sorted(self.pdf_names))))
+        )
+        create_vector_store(chunks, self.database_path, embedding_model=embedding_model)
 
     def ask(self, question):
         if self.vector_store is None:
@@ -70,29 +66,23 @@ class RAGPipeline:
 
         retriever = self.vector_store.as_retriever(
             search_type="mmr",
-            search_kwargs={"k": 20, "fetch_k": 60},
+            search_kwargs={"k": 5, "fetch_k": 10},
         )
 
-        documents = retriever.invoke(question)
+        documents = list(retriever.invoke(question))
         combined_documents = list(documents)
 
-        keyword_results = self.hybrid_search.keyword_search(question, k=15)
-
+        keyword_results = self.hybrid_search.keyword_search(question, k=3)
         seen = {
             (doc.metadata["source"], doc.metadata["page"]) for doc in combined_documents
         }
-        for document, score in keyword_results:
+        for document, _score in keyword_results:
             key = (document.metadata["source"], document.metadata["page"])
             if key not in seen:
                 combined_documents.append(document)
                 seen.add(key)
 
         documents = combined_documents
-        print("\nRetrieved Documents:")
-        for doc in documents:
-            print(os.path.basename(doc.metadata["source"]), "Page", doc.metadata["page"])
-
-        retrieved_pdf_names = list({os.path.basename(doc.metadata["source"]) for doc in documents})
 
         if not documents:
             return (
@@ -101,45 +91,48 @@ class RAGPipeline:
                 0,
             )
 
-        expanded_documents = []
-        for doc in documents:
-            expanded_documents.append(doc)
-            current_page = doc.metadata["page"]
-            source = doc.metadata["source"]
-            for candidate in self.hybrid_search.documents:
-                if (
-                    candidate.metadata["source"] == source
-                    and abs(candidate.metadata["page"] - current_page) == 1
-                ):
-                    expanded_documents.append(candidate)
+        if len(documents) < 5:
+            expanded_documents = []
+            for doc in documents:
+                expanded_documents.append(doc)
+                current_page = doc.metadata["page"]
+                source = doc.metadata["source"]
+                for candidate in self.hybrid_search.documents:
+                    if (
+                        candidate.metadata["source"] == source
+                        and abs(candidate.metadata["page"] - current_page) == 1
+                    ):
+                        expanded_documents.append(candidate)
 
-        seen = set()
-        documents = []
-        for doc in expanded_documents:
-            key = (doc.metadata["source"], doc.metadata["page"], doc.page_content)
-            if key not in seen:
-                seen.add(key)
-                documents.append(doc)
+            seen = set()
+            documents = []
+            for doc in expanded_documents:
+                key = (doc.metadata["source"], doc.metadata["page"], doc.page_content)
+                if key not in seen:
+                    seen.add(key)
+                    documents.append(doc)
 
-        print("MMR Retrieval Completed")
+        documents = documents[:8]
+
+        retrieved_pdf_names = list(
+            {os.path.basename(doc.metadata["source"]) for doc in documents}
+        )
 
         document_groups = defaultdict(list)
         for document in documents:
             pdf_name = os.path.basename(document.metadata["source"])
             document_groups[pdf_name].append(document)
 
-        print("\nRetrieved Documents")
+        context_parts = []
         for pdf_name, docs in document_groups.items():
-            print(f"{pdf_name}")
-            for doc in docs:
-                print(f"  Page {doc.metadata['page']}")
-
-        context = ""
-        for pdf_name, docs in document_groups.items():
-            context += f"========== {pdf_name} =========="
+            context_parts.append(f"========== {pdf_name} ==========")
             for document in docs:
                 page = document.metadata["page"]
-                context += f"[Document: {pdf_name} | Page: {page}]{document.page_content}"
+                context_parts.append(
+                    f"[Document: {pdf_name} | Page: {page}] {document.page_content}"
+                )
+
+        context = "\n".join(context_parts)
 
         prompt = f"""
 You are an expert Multi-Document AI Assistant.
@@ -192,10 +185,6 @@ Answer:
             )
 
         response = llm.invoke(prompt)
-
-        print("==============================")
-        print("Retrieved Documents:", len(documents))
-        print("==============================")
 
         if len(documents) >= 15:
             confidence = 95

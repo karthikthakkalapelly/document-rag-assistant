@@ -16,13 +16,22 @@ def import_rag_pipeline():
 
 @st.cache_resource(show_spinner=False)
 def get_embedding_model():
-    from langchain_huggingface import HuggingFaceEmbeddings
-    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    from langchain_google_genai import GoogleGenerativeAIEmbeddings
+    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    return GoogleGenerativeAIEmbeddings(
+        model="models/embedding-001",
+        google_api_key=api_key,
+    )
 
 @st.cache_resource(show_spinner=False)
 def get_llm():
     from src.llm import load_llm
     return load_llm()
+
+@st.cache_resource(show_spinner=False)
+def get_vector_store(database_path):
+    from src.retriever import load_vector_store
+    return load_vector_store(database_path)
 
 RAGPipeline = None
 RAG_PIPELINE_IMPORT_ERROR = None
@@ -31,7 +40,7 @@ RAG_PIPELINE_IMPORT_ERROR = None
 st.set_page_config(
     page_title="Document RAG Assistant",
     page_icon="📄",
-    layout="wide"
+    layout="wide",
 )
 
 st.title("📄 Document RAG Assistant")
@@ -42,38 +51,37 @@ if RAG_PIPELINE_IMPORT_ERROR is not None:
     st.exception(RAG_PIPELINE_IMPORT_ERROR)
     st.stop()
 
-# Initialize pipeline
+# Initialize state
 if "pipeline" not in st.session_state:
     st.session_state.pipeline = None
 
-#Initialize chat history
 if "messages" not in st.session_state:
-    st.session_state.messages=[]
+    st.session_state.messages = []
 
 if "database_ready" not in st.session_state:
-    st.session_state.database_ready=False
+    st.session_state.database_ready = False
 
 if "uploaded_pdf_names" not in st.session_state:
-    st.session_state.uploaded_pdf_names=[]
+    st.session_state.uploaded_pdf_names = []
 
-#Side bar
+# Sidebar
 with st.sidebar:
     st.header("📂 Upload Documents")
-    uploaded_files=st.file_uploader("Choose PDF files",type=["pdf"],accept_multiple_files=True)
+    uploaded_files = st.file_uploader(
+        "Choose PDF files",
+        type=["pdf"],
+        accept_multiple_files=True,
+    )
 
-    if uploaded_files :
-        uploaded_names=[file.name for file in uploaded_files]
+    if uploaded_files:
+        uploaded_names = [file.name for file in uploaded_files]
 
-        #Build database only if a different pdf is uploaded
         if uploaded_names != st.session_state.uploaded_pdf_names:
-
-            os.makedirs("data",exist_ok=True)
-            pdf_paths=[]
+            os.makedirs("data", exist_ok=True)
+            pdf_paths = []
             for uploaded_file in uploaded_files:
-                pdf_path=os.path.join("data",
-                                  uploaded_file.name)
-            
-                with open(pdf_path,"wb")as file:
+                pdf_path = os.path.join("data", uploaded_file.name)
+                with open(pdf_path, "wb") as file:
                     file.write(uploaded_file.getbuffer())
                 pdf_paths.append(pdf_path)
 
@@ -90,63 +98,57 @@ with st.sidebar:
                     pdf_paths,
                     embedding_model=get_embedding_model(),
                 )
+                st.session_state.pipeline.vector_store = get_vector_store(
+                    st.session_state.pipeline.database_path
+                )
+
             if st.session_state.pipeline.ocr_documents:
-                    st.warning(
-        "📄 OCR was used for:\n\n" +
-        "\n".join(st.session_state.pipeline.ocr_documents)
-    )
+                st.warning(
+                    "📄 OCR was used for:\n\n"
+                    + "\n".join(st.session_state.pipeline.ocr_documents)
+                )
             else:
-                    st.success("✅ Text-based PDFs detected. OCR was not required.")
-                
-            st.session_state.database_ready=True
-            st.session_state.uploaded_pdf_names=uploaded_names
-            st.session_state.messages=[]
+                st.success("✅ Text-based PDFs detected. OCR was not required.")
+
+            st.session_state.database_ready = True
+            st.session_state.uploaded_pdf_names = uploaded_names
+            st.session_state.messages = []
             st.success("Database Created Successfully!")
 
     st.divider()
 
-    #Document Information
     if st.session_state.database_ready:
         st.subheader("📄 Uploaded Documents")
-        st.write(f"Total PDFs:{len(st.session_state.pipeline.pdf_names)}")
-        st.write(f"Total pages:{st.session_state.pipeline.total_pages}")
-        st.write(f"Total chunks:{st.session_state.pipeline.total_chunks}")
-        st.write("###Files")
-        
+        st.write(f"Total PDFs: {len(st.session_state.pipeline.pdf_names)}")
+        st.write(f"Total pages: {st.session_state.pipeline.total_pages}")
+        st.write(f"Total chunks: {st.session_state.pipeline.total_chunks}")
+        st.write("### Files")
         for pdf in st.session_state.pipeline.pdf_names:
             st.success(pdf)
 
-    
-    st.divider()    
-#Clear chat button
+    st.divider()
+
     if st.button("🗑️ Clear Chat"):
-        st.session_state.messages=[]
+        st.session_state.messages = []
         st.rerun()
 
-#Display previous messages
+# Display previous messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-#Chat input
-question=st.chat_input("Ask your questtion")
-
-#Process user question
+# Chat input
+question = st.chat_input("Ask your question")
 
 if question:
     if not st.session_state.database_ready:
         st.warning("⚠️ Please upload a PDF first.")
         st.stop()
 
-    #Show user message
-    st.session_state.messages.append({
-        "role":"user",
-        "content":question
-    })
+    st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user"):
         st.markdown(question)
 
-#Generate AI response
     with st.chat_message("assistant"):
         with st.spinner("Thinking"):
             if st.session_state.pipeline.llm is None:
@@ -158,10 +160,10 @@ if question:
             pdf_name = os.path.basename(source.metadata["source"])
             document_sources[pdf_name].add(source.metadata["page"])
 
-        source_text = ""
+        source_lines = []
         for pdf_name, pages in document_sources.items():
             page_list = ", ".join(map(str, sorted(pages)))
-            source_text += f"• {pdf_name} → Page(s): {page_list}\n"
+            source_lines.append(f"• {pdf_name} → Page(s): {page_list}")
 
         response = f"""
 {answer}
@@ -169,7 +171,7 @@ if question:
 ---
 📊 **Confidence:** {confidence}%
 📚 **Sources**
-{source_text}
+{"\n".join(source_lines)}
 """
 
         st.markdown(response)
@@ -180,8 +182,4 @@ if question:
                 st.write(source.page_content)
                 st.divider()
 
-    #Save assistant response
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": response
-    })
+    st.session_state.messages.append({"role": "assistant", "content": response})
