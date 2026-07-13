@@ -58,7 +58,11 @@ class RAGPipeline:
             "database",
             str(hash(tuple(sorted(self.pdf_names))))
         )
-        create_vector_store(chunks, self.database_path, embedding_model=embedding_model)
+        # create and persist the vector store, keep reference for queries
+        self.vector_store = create_vector_store(
+            chunks, self.database_path, embedding_model=embedding_model
+        )
+        return self.database_path
 
     def ask(self, question):
         if self.vector_store is None:
