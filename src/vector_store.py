@@ -1,10 +1,12 @@
 import os
 
-def create_vector_store(chunks, database_path):  # creates a chroma vector database for the given document chunks.
+def create_vector_store(chunks, database_path, embedding_model=None):
     from langchain_chroma import Chroma
-    from langchain_huggingface import HuggingFaceEmbeddings
 
-    embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    if embedding_model is None:
+        from langchain_huggingface import HuggingFaceEmbeddings
+        embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
     os.makedirs(database_path, exist_ok=True)
 
     vector_store = Chroma.from_documents(

@@ -1,11 +1,6 @@
 from collections import defaultdict
 import os
 
-from src.chunker import create_chunks
-from src.llm import load_llm
-from src.pdf_loader import load_pdf
-from src.hybrid_search import HybridSearch
-
 
 class RAGPipeline:
     def __init__(self):
@@ -19,10 +14,15 @@ class RAGPipeline:
 
     def load_llm_if_needed(self):
         if self.llm is None:
+            from src.llm import load_llm
             self.llm = load_llm()
         return self.llm
 
-    def build_database(self, pdf_paths):
+    def build_database(self, pdf_paths, embedding_model=None):
+        from src.chunker import create_chunks
+        from src.pdf_loader import load_pdf
+        from src.hybrid_search import HybridSearch
+
         all_documents = []
         self.pdf_names = []
         self.ocr_documents = []
@@ -54,8 +54,12 @@ class RAGPipeline:
         from src.vector_store import create_vector_store
         from src.retriever import load_vector_store
 
+        if embedding_model is None:
+            from langchain_huggingface import HuggingFaceEmbeddings
+            embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
         database_path = os.path.join("database", str(hash(tuple(sorted(self.pdf_names)))))
-        create_vector_store(chunks, database_path)
+        create_vector_store(chunks, database_path, embedding_model=embedding_model)
         self.vector_store = load_vector_store(database_path)
 
         print("Vector database created successfully.")

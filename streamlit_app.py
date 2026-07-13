@@ -4,13 +4,28 @@ import streamlit as st
 from collections import defaultdict
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.abspath(os.getcwd()))
 
-try:
-    from src.rag_pipeline import RAGPipeline
-    RAG_PIPELINE_IMPORT_ERROR = None
-except Exception as exc:
-    RAGPipeline = None
-    RAG_PIPELINE_IMPORT_ERROR = exc
+
+def import_rag_pipeline():
+    try:
+        from src.rag_pipeline import RAGPipeline
+        return RAGPipeline, None
+    except Exception as exc:
+        return None, exc
+
+@st.cache_resource(show_spinner=False)
+def get_embedding_model():
+    from langchain_huggingface import HuggingFaceEmbeddings
+    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+@st.cache_resource(show_spinner=False)
+def get_llm():
+    from src.llm import load_llm
+    return load_llm()
+
+RAGPipeline = None
+RAG_PIPELINE_IMPORT_ERROR = None
 
 # Page configuration
 st.set_page_config(
@@ -29,7 +44,7 @@ if RAG_PIPELINE_IMPORT_ERROR is not None:
 
 # Initialize pipeline
 if "pipeline" not in st.session_state:
-    st.session_state.pipeline = RAGPipeline()
+    st.session_state.pipeline = None
 
 #Initialize chat history
 if "messages" not in st.session_state:
@@ -62,12 +77,19 @@ with st.sidebar:
                     file.write(uploaded_file.getbuffer())
                 pdf_paths.append(pdf_path)
 
-            
-            #Create a  new pipeline for the uploaded PDF
-            st.session_state.pipeline=RAGPipeline()
+            if st.session_state.pipeline is None:
+                RAGPipeline, RAG_PIPELINE_IMPORT_ERROR = import_rag_pipeline()
+                if RAG_PIPELINE_IMPORT_ERROR is not None:
+                    st.error("Backend failed to load. Please check server logs.")
+                    st.exception(RAG_PIPELINE_IMPORT_ERROR)
+                    st.stop()
+                st.session_state.pipeline = RAGPipeline()
 
             with st.spinner("Building vector database..."):
-                st.session_state.pipeline.build_database(pdf_paths)
+                st.session_state.pipeline.build_database(
+                    pdf_paths,
+                    embedding_model=get_embedding_model(),
+                )
             if st.session_state.pipeline.ocr_documents:
                     st.warning(
         "📄 OCR was used for:\n\n" +
@@ -127,63 +149,39 @@ if question:
 #Generate AI response
     with st.chat_message("assistant"):
         with st.spinner("Thinking"):
-         answer,sources,confidence=st.session_state.pipeline.ask(question)
-        #Remove duplicate page numbers
-         
+            if st.session_state.pipeline.llm is None:
+                st.session_state.pipeline.llm = get_llm()
+            answer, sources, confidence = st.session_state.pipeline.ask(question)
 
-# ---------------------------------------
-# Group source pages by document
-# ---------------------------------------
+        document_sources = defaultdict(set)
+        for source in sources:
+            pdf_name = os.path.basename(source.metadata["source"])
+            document_sources[pdf_name].add(source.metadata["page"])
 
-         document_sources = defaultdict(set)
-         for source in sources:
-            pdf_name = os.path.basename(
-             source.metadata["source"]
-    )
+        source_text = ""
+        for pdf_name, pages in document_sources.items():
+            page_list = ", ".join(map(str, sorted(pages)))
+            source_text += f"• {pdf_name} → Page(s): {page_list}\n"
 
-            document_sources[pdf_name].add(
-            source.metadata["page"]
-    )
+        response = f"""
+{answer}
 
-# ---------------------------------------
-# Build source text
-# ---------------------------------------
+---
+📊 **Confidence:** {confidence}%
+📚 **Sources**
+{source_text}
+"""
 
-         source_text = ""
-         for pdf_name, pages in document_sources.items():
-            page_list = ", ".join(
-              map(str, sorted(pages))
-    )
-
-            source_text += (
-              f"• {pdf_name} → Page(s): {page_list}\n"
-    )
-
-            response = f"""
-            {answer}
-
-            ---
-            📊 **Confidence:** {confidence}%
-            📚 **Sources**
-            {source_text}
-            """
-         st.markdown(response)
-         with st.expander("🔍 View Retrieved Context"):
-             for index, source in enumerate(sources,start=1):
-                st.markdown(
-                f"### Result {index}"
-        )
-
-                st.write(
-                f"**Page:** {source.metadata['page']}"
-        )
-
+        st.markdown(response)
+        with st.expander("🔍 View Retrieved Context"):
+            for index, source in enumerate(sources, start=1):
+                st.markdown(f"### Result {index}")
+                st.write(f"**Page:** {source.metadata['page']}")
                 st.write(source.page_content)
-
                 st.divider()
 
     #Save assistant response
     st.session_state.messages.append({
-        "role":"assistant",
-        "content":response
+        "role": "assistant",
+        "content": response
     })
