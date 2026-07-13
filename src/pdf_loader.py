@@ -16,8 +16,14 @@ def _has_tesseract():
     try:
         import pytesseract
         from shutil import which
-        return which("tesseract") is not None
+        tpath = which("tesseract")
+        if tpath:
+            print("Tesseract binary found at:", tpath)
+        else:
+            print("Tesseract binary not found in PATH")
+        return tpath is not None
     except ImportError:
+        print("pytesseract not installed")
         return False
 
 
@@ -37,8 +43,33 @@ def _ocr_placeholder(page_number, pdf_path, reason):
 
 def _render_pdf_pages(pdf_path):
     from pdf2image import convert_from_path
+    print("Rendering PDF pages with pdf2image (poppler_path=", POPPLER_PATH, ")")
+    try:
+        if POPPLER_PATH and os.path.exists(POPPLER_PATH):
+            images = convert_from_path(pdf_path, poppler_path=POPPLER_PATH)
+        else:
+            images = convert_from_path(pdf_path)
+        print(f"pdf2image rendered {len(images)} pages")
+        return images
+    except Exception as e:
+        print("pdf2image failed:", type(e).__name__, e)
+        print("Attempting PyMuPDF (fitz) fallback to render pages")
+        try:
+            import fitz  # PyMuPDF
+            from PIL import Image
 
-    return convert_from_path(pdf_path, poppler_path=POPPLER_PATH)
+            images = []
+            doc = fitz.open(pdf_path)
+            for page in doc:
+                pix = page.get_pixmap(alpha=False)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                images.append(img)
+            print(f"PyMuPDF rendered {len(images)} pages")
+            return images
+        except Exception as e2:
+            print("PyMuPDF fallback failed:", type(e2).__name__, e2)
+            # propagate the original pdf2image exception for visibility
+            raise
 
 
 def _extract_images_from_pdf(pdf_path) -> List[object]:
@@ -88,10 +119,11 @@ def _google_vision_ocr(image, api_key):
         response.raise_for_status()
     except requests.exceptions.HTTPError as exc:
         print("Google Vision OCR request failed:", exc)
-        return ""
+        # propagate so caller can surface the error
+        raise
     except requests.exceptions.RequestException as exc:
         print("Google Vision OCR network error:", exc)
-        return ""
+        raise
 
     result = response.json()
     annotations = result.get("responses", [{}])[0].get("fullTextAnnotation", {})
@@ -99,22 +131,34 @@ def _google_vision_ocr(image, api_key):
 
 
 def _ocr_image(image, api_key=None):
+    print("OCR: starting image OCR. Tesseract available:", _has_tesseract(), "Google API key present:", bool(api_key))
     if _has_tesseract():
-        import pytesseract
-        return pytesseract.image_to_string(image).strip()
+        try:
+            import pytesseract
+            text = pytesseract.image_to_string(image).strip()
+            print("OCR: pytesseract produced", len(text), "chars")
+            return text
+        except Exception as e:
+            print("pytesseract OCR failed:", type(e).__name__, e)
+            # propagate the exception so the failure is visible
+            raise
 
     if api_key:
-        return _google_vision_ocr(image, api_key)
+        # _google_vision_ocr will raise on HTTP/network errors
+        text = _google_vision_ocr(image, api_key)
+        print("OCR: Google Vision produced", len(text), "chars")
+        return text
 
-    return ""
+    raise RuntimeError("No OCR engine available: install Tesseract or set GOOGLE_API_KEY")
 
 
 def load_pdf(pdf_path):
     from langchain_community.document_loaders import PyPDFLoader
-
+    print("Loading PDF via PyPDFLoader:", pdf_path)
     loader = PyPDFLoader(pdf_path)
     documents = loader.load()
     text = "".join(doc.page_content for doc in documents)
+    print("PyPDFLoader produced", len(documents), "pages with total text length", len(text))
 
     if len(text.strip()) > 100:
         return documents, False
@@ -126,28 +170,32 @@ def load_pdf(pdf_path):
     try:
         images = _render_pdf_pages(pdf_path)
     except Exception as exc:
-        print("PDF rendering failed, trying image extraction:", exc)
+        print("PDF rendering failed:", type(exc).__name__, exc)
+        print("Trying to extract embedded images from PDF pages")
         try:
             images = _extract_images_from_pdf(pdf_path)
+            print(f"Extracted {len(images)} embedded images from PDF")
         except Exception as exc2:
-            print("PDF image extraction failed:", exc2)
-            images = []
+            print("PDF image extraction failed:", type(exc2).__name__, exc2)
+            # propagate so the caller/Streamlit shows the error
+            raise
 
     if not images:
-        return [
-            _ocr_placeholder(
-                1,
-                pdf_path,
-                "the PDF could not be converted to images on this platform",
-            )
-        ], True
+        raise RuntimeError("No images found/rendered from PDF for OCR")
 
     ocr_docs = []
     for page_number, image in enumerate(images, start=1):
-        ocr_text = _ocr_image(image, api_key=api_key)
+        print(f"OCR: processing page {page_number}/{len(images)}")
+        try:
+            ocr_text = _ocr_image(image, api_key=api_key)
+        except Exception:
+            print(f"OCR failed on page {page_number}; attaching placeholder")
+            raise
+
+        print(f"OCR: page {page_number} text length: {len(ocr_text)}")
         if not ocr_text:
             reason = (
-                "OCR failed with the available extractor"
+                "OCR produced no text"
                 if api_key or _has_tesseract()
                 else "Tesseract is not installed and no Google API key is configured"
             )
