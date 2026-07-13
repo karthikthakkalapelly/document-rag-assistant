@@ -19,7 +19,7 @@ class RAGPipeline:
             self.llm = load_llm()
         return self.llm
 
-    def build_database(self, pdf_paths, embedding_model=None):
+    def build_database(self, pdf_paths, embedding_model=None, **kwargs):
         from src.chunker import create_chunks
         from src.pdf_loader import load_pdf
         from src.hybrid_search import HybridSearch
