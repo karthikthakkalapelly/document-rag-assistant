@@ -1,6 +1,9 @@
 import os
+import sys
 import streamlit as st
 from collections import defaultdict
+
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 try:
     from src.rag_pipeline import RAGPipeline
