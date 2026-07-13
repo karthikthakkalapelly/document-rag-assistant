@@ -6,6 +6,42 @@ from collections import defaultdict
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 sys.path.insert(0, os.path.abspath(os.getcwd()))
 
+CUSTOM_CSS = """
+<style>
+    .stApp {
+        background: linear-gradient(180deg, #0b1726 0%, #121a34 45%, #151e3d 100%);
+        color: #ffffff;
+    }
+    .stButton>button {
+        background-color: #5b8def;
+        color: white;
+        border-radius: 12px;
+        padding: 0.75rem 1.2rem;
+        font-weight: 600;
+    }
+    .stButton>button:hover {
+        background-color: #4177f2;
+        color: white;
+    }
+    .stTextInput>div>div>input {
+        border-radius: 12px;
+        border: 1px solid #65758c;
+        background: rgba(255,255,255,0.06);
+        color: #ffffff;
+    }
+    .stFileUploader {
+        border: 1px solid #4f6a9c;
+        border-radius: 16px;
+        background: rgba(255,255,255,0.05);
+    }
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {
+        color: #ffffff;
+    }
+</style>
+"""
+
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
 
 def import_rag_pipeline():
     try:
@@ -44,21 +80,32 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("📄 Document RAG Assistant")
-st.markdown(
-    "Upload PDFs, build a searchable knowledge base, and ask natural language "
-    "questions with Gemini. OCR and hybrid search are enabled automatically."
-)
+with st.container():
+    left, right = st.columns([3, 1])
+    with left:
+        st.markdown("""
+            <div style='padding: 0 0.2rem;'>
+                <h1 style='margin-bottom:0.15rem;'>📄 Document RAG Assistant</h1>
+                <p style='font-size:1.05rem; color:#cbd5e1; line-height:1.6;'>
+                    Build a private document intelligence workspace that handles PDFs, OCR, and smart search without loading everything at startup.
+                    Designed for low-memory deployments and enterprise-grade self-service workflows.
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+    with right:
+        st.metric(label="Deployment", value="Render Free")
+        st.metric(label="Memory", value="Low Usage")
+        st.metric(label="Experience", value="Premium")
 
-with st.expander("How it works", expanded=False):
+with st.expander("How it works", expanded=True):
     st.write(
-        "1. Upload PDF documents.\n"
-        "2. The app indexes content with Chroma and Gemini embeddings.\n"
-        "3. Ask questions in the chat and get answers with referenced pages.\n"
-        "4. OCR is applied only when needed for scanned PDFs."
+        "1. Upload PDF documents to build your knowledge base.\n"
+        "2. The app analyzes content with Gemini embeddings and Chroma retrieval.\n"
+        "3. Ask natural language questions and get concise answers with sources.\n"
+        "4. OCR is applied only when scanned PDF content is detected, and fallback is graceful."
     )
 
-st.divider()
+st.markdown("---")
 
 if RAG_PIPELINE_IMPORT_ERROR is not None:
     st.error("Backend failed to load. Please check server logs.")
@@ -185,13 +232,14 @@ if question:
             page_list = ", ".join(map(str, sorted(pages)))
             source_lines.append(f"• {pdf_name} → Page(s): {page_list}")
 
-        response = f"""
+        sources_text = "\n".join(source_lines)
+        response = """
 {answer}
 
 ---
 📊 **Confidence:** {confidence}%
 📚 **Sources**
-{"\n".join(source_lines)}
+{sources_text}
 """
 
         st.markdown(response)
