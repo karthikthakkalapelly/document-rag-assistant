@@ -80,22 +80,15 @@ st.set_page_config(
     layout="wide",
 )
 
-with st.container():
-    left, right = st.columns([3, 1])
-    with left:
-        st.markdown("""
-            <div style='padding: 0 0.2rem;'>
-                <h1 style='margin-bottom:0.15rem;'>📄 Document RAG Assistant</h1>
-                <p style='font-size:1.05rem; color:#cbd5e1; line-height:1.6;'>
-                    Build a private document intelligence workspace that handles PDFs, OCR, and smart search without loading everything at startup.
-                    Designed for low-memory deployments and enterprise-grade self-service workflows.
-                </p>
-            </div>
-        """, unsafe_allow_html=True)
-    with right:
-        st.metric(label="Deployment", value="Render Free")
-        st.metric(label="Memory", value="Low Usage")
-        st.metric(label="Experience", value="Premium")
+st.markdown("""
+    <div style='padding: 0 0.2rem;'>
+        <h1 style='margin-bottom:0.15rem;'>📄 Document RAG Assistant</h1>
+        <p style='font-size:1.05rem; color:#cbd5e1; line-height:1.6;'>
+            Build a private document intelligence workspace that handles PDFs, OCR, and smart search without loading everything at startup.
+            Designed for enterprise-grade self-service workflows.
+        </p>
+    </div>
+""", unsafe_allow_html=True)
 
 with st.expander("How it works", expanded=True):
     st.write(
@@ -232,8 +225,9 @@ if question:
             page_list = ", ".join(map(str, sorted(pages)))
             source_lines.append(f"• {pdf_name} → Page(s): {page_list}")
 
-        sources_text = "\n".join(source_lines)
-        response = """
+        if source_lines:
+            sources_text = "\n".join(source_lines)
+            response = """
 {answer}
 
 ---
@@ -241,6 +235,8 @@ if question:
 📚 **Sources**
 {sources_text}
 """
+        else:
+            response = answer
 
         st.markdown(response)
         with st.expander("🔍 View Retrieved Context"):
