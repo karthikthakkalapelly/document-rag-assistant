@@ -70,8 +70,24 @@ def get_vector_store(database_path):
 
     return load_vector_store(database_path, embedding_model=get_embedding_model())
 
-RAGPipeline = None
-RAG_PIPELINE_IMPORT_ERROR = None
+RAGPipeline, RAG_PIPELINE_IMPORT_ERROR = import_rag_pipeline()
+if RAG_PIPELINE_IMPORT_ERROR is not None:
+    st.error("Backend failed to load. Please check server logs.")
+    st.exception(RAG_PIPELINE_IMPORT_ERROR)
+    st.stop()
+
+# Ensure any existing pipeline in session state is an instance of the currently
+# imported RAGPipeline class. This avoids calling outdated methods on a
+# stale pipeline object after code changes (hot-reload / session persistence).
+if "pipeline" not in st.session_state or not isinstance(
+    st.session_state.get("pipeline"), RAGPipeline
+):
+    try:
+        st.session_state.pipeline = RAGPipeline()
+    except Exception as e:
+        st.error("Failed to initialize pipeline.")
+        st.exception(e)
+        st.stop()
 
 # Page configuration
 st.set_page_config(
