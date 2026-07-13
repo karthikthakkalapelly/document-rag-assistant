@@ -50,7 +50,7 @@ class RAGPipeline:
             from langchain_google_genai import GoogleGenerativeAIEmbeddings
             api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
             embedding_model = GoogleGenerativeAIEmbeddings(
-                model="models/embedding-001",
+                model="gemini-embedding-2-preview",
                 google_api_key=api_key,
             )
 
