@@ -83,8 +83,16 @@ def _google_vision_ocr(image, api_key):
         ]
     }
 
-    response = requests.post(url, json=payload, timeout=60)
-    response.raise_for_status()
+    try:
+        response = requests.post(url, json=payload, timeout=60)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as exc:
+        print("Google Vision OCR request failed:", exc)
+        return ""
+    except requests.exceptions.RequestException as exc:
+        print("Google Vision OCR network error:", exc)
+        return ""
+
     result = response.json()
     annotations = result.get("responses", [{}])[0].get("fullTextAnnotation", {})
     return annotations.get("text", "").strip()
