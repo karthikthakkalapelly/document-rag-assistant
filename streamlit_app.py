@@ -5,19 +5,10 @@ from collections import defaultdict
 from dotenv import load_dotenv
 from pathlib import Path
 
-# Debug: ensure dotenv from `src/.env` is loaded so GOOGLE_API_KEY is available
-cwd = os.getcwd()
-print("CWD:", cwd)
+# Load dotenv from `src/.env` if present (no debug prints)
 dotenv_path = Path(__file__).resolve().parent / "src" / ".env"
-print("Looking for .env at:", dotenv_path)
-print(".env exists:", dotenv_path.exists())
 if dotenv_path.exists():
     load_dotenv(dotenv_path)
-    print("Loaded .env from", dotenv_path)
-else:
-    print("No src/.env found; relying on environment variables")
-
-print("GOOGLE_API_KEY present:", bool(os.getenv("GOOGLE_API_KEY")))
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 sys.path.insert(0, os.path.abspath(os.getcwd()))
